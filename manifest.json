@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.samcapshaw.dispatch",
+  "name": "Dispatch",
+  "version": "0.1.0",
+  "author": "Sam Capshaw",
+  "license": "MIT",
+  "description": "A theme-aware RSS, Atom and Drudge news reader with search, unread tracking and saved stories.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Dispatch",
+    "description": "Open the Dispatch news reader.",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

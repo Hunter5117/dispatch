@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'none'; connect-src 'none'; font-src 'self'">
+<title>Dispatch</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<aside>
+ <div class="brand"><span class="brand-icon">◫</span><div>dispatch<small>OMARCHY NEWS READER</small></div></div>
+ <div class="nav-label">LIBRARY</div>
+ <nav id="library"></nav>
+ <div class="source-heading"><span class="nav-label">YOUR SOURCES</span><button class="icon" id="add" aria-label="Add source" title="Add source">＋</button></div>
+ <nav id="sources"></nav>
+ <div class="sidebar-bottom"><span class="status-dot"></span><span id="sync">Ready to read</span><small>Local library · No account needed</small></div>
+</aside>
+<main>
+ <header><div><span class="eyebrow" id="date"></span><h1 id="heading">Your briefing<span>.</span></h1><p id="subtitle">A quieter place to catch up.</p></div>
+ <button id="refresh" class="secondary">↻ <span>Refresh</span></button></header>
+ <div class="tools"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search headlines and sources…" aria-label="Search headlines"></label><button id="compact" class="secondary" title="Toggle compact layout">☷ <span>Compact</span></button><button id="read-all" class="secondary">✓ <span>Mark read</span></button></div>
+ <div id="notice" role="status" hidden></div>
+ <section id="featured" hidden></section>
+ <div class="section-heading"><span id="section-label">LATEST STORIES</span><span id="results"></span></div>
+ <section id="stories" aria-label="Headlines"></section>
+ <div id="empty" hidden><span>◫</span><h2>Nothing here yet.</h2><p>Refresh your sources or add a new feed.</p><button class="primary" id="empty-add">Add a source</button></div>
+ <footer>Headlines and excerpts from your sources. Original reporting belongs to its publishers.<span>↻ Updates every 5 minutes</span></footer>
+</main>
+<dialog id="feed-dialog"><form id="feed-form"><div class="dialog-top"><div><span class="eyebrow">MAKE IT YOURS</span><h2>Add a source</h2></div><button type="button" class="icon" id="close-feed" aria-label="Close">×</button></div><p>Follow any site with an RSS or Atom feed.</p><label>Name<input id="feed-name" placeholder="My favorite publication" maxlength="70"></label><label>Feed URL<input id="feed-url" type="url" placeholder="https://example.com/feed.xml" required></label><div id="feed-notice" role="status"></div><button class="primary" type="submit">Add source →</button><div class="dialog-rule"></div><span class="eyebrow">YOUR SUBSCRIPTIONS</span><div id="manage-feeds"></div><p class="muted">Removing a source keeps its saved stories.</p></form></dialog>
+<dialog id="article-dialog"><div class="article-actions"><button id="close-article" class="secondary">← Back to headlines</button><button id="article-save" class="secondary">☆ Save</button></div><div id="article-source" class="eyebrow"></div><h2 id="article-title"></h2><div id="article-body"></div><button id="article-open" class="primary">Read original article ↗</button><p class="muted">Feed excerpt · Opens in your browser</p></dialog>
+<script src="app.js"></script></body></html>
