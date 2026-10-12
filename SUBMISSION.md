@@ -2,12 +2,12 @@
 
 Title: **[Plugin]: Dispatch**
 
-Replace `OWNER` with the authenticated GitHub account. Confirm the published URL and all checklist items before submitting this body through the marketplace form:
+Review and confirm all checklist items before submitting this body through the marketplace form:
 https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=submit-plugin.yml
 
 ### Repository URL
 
-https://github.com/OWNER/dispatch
+https://github.com/samcapshaw/dispatch
 
 ### Category
 

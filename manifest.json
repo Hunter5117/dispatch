@@ -20,5 +20,6 @@
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right"
-  }
+  },
+  "homepage": "https://github.com/samcapshaw/dispatch"
 }
