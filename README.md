@@ -2,16 +2,17 @@
 
 ![Dispatch with fictional sample stories](preview.png)
 
-A local news reader for Omarchy, styled with your active theme. Read RSS and Atom feeds in one calm interface, with a Drudge Report headline adapter included.
+A local news reader for Omarchy, styled with your active theme. Read RSS and Atom feeds in one calm interface, with a Drudge Report RSS source included.
 
 - All, unread and saved-story views; search across sources and excerpts.
 - Add and remove RSS/Atom subscriptions, verified before saving.
-- Article previews, compact layout and five-minute refresh.
+- Article previews, four reading layouts and five-minute refresh.
+- Saved reading preferences: Briefing, Wide blocks, Feed and Headlines only; optional publisher photos.
 - Cached headlines when a publisher is unavailable; saved stories remain in your library.
-- Theme colors update automatically. No account, hosted service, remote images or tracking scripts.
+- Theme colors update automatically. No account, hosted service or tracking scripts. Publisher photos are optional and off by default.
 - Omarchy shell command, launcher entry and optional bar button.
 
-Starter sources: BBC World, The Guardian World, NPR News, Ars Technica and Drudge Report. Use **+ beside Your Sources** to add more feeds. Feed excerpts vary in length; originals open in your default browser. Dispatch does not fetch full articles or bypass subscriptions.
+Starter sources: BBC World, The Guardian World, NPR News, Ars Technica and Drudge Report. Use **+ beside Your Sources** to add more feeds. Feed content varies in length. Dispatch shows full feed text when supplied and loads a styled reader view from publisher pages for short entries. Paywalls, blocked requests and unsupported pages may require the original site.
 
 ## Install
 
@@ -34,15 +35,15 @@ For standalone use from a checkout, run `python reader.py` with the same Python/
 
 ## Use
 
-Click a headline for its excerpt; **Read original** opens the publisher in your browser. Use the star to save a story. `/` or Ctrl+F searches, Ctrl+R refreshes, and Escape closes a dialog. Source management is available from **+**.
+Click a headline to read inside Dispatch; short feed entries automatically load a reader view from the publisher. **Load reader view** also fetches publisher text on demand. **Read original** opens the publisher in your browser. Use the star to save a story. `/` or Ctrl+F searches, Ctrl+R refreshes, and Escape closes a dialog. Source management is available from **+**. Open **Layout & photos** for layout and photo preferences, which save automatically. Existing compact-layout users keep the Headlines only view.
 
 ## Storage and network access
 
 Subscriptions and reading state: `~/.local/share/omarchy-news/`. Cached feeds: `~/.cache/omarchy-news/`. These locations match the original standalone Dispatch app, preserving existing libraries.
 
-Dispatch contacts your configured feeds at launch, every five minutes while open, and when you refresh. Adding a source fetches its URL to verify RSS/Atom content. Drudge uses a headline parser against its public homepage. A source failure keeps the last cached stories. Response size is limited to 5 MB and requests time out after 20 seconds.
+Dispatch contacts your configured feeds at launch, every five minutes while open, and when you refresh. Adding a source fetches its URL to verify RSS/Atom content. Drudge uses the FeedPress Drudge Report feed, falling back to its public homepage if the feed is unavailable. FeedPress tracking-pixel images are excluded. A source failure keeps the last cached stories. Response size is limited to 5 MB and requests time out after 20 seconds.
 
-Source markup is converted to text. The reading surface loads local assets only; feed scripts, HTML and remote images are not rendered. Opening an original article delegates to your browser. Feed availability and publisher formats may change. This app is independent of the publications.
+Source markup is converted to text. Feed scripts and HTML are not rendered. When you enable story photos, the reading surface also loads feed-provided images from publishers and their image hosts without a referrer. Missing or failed photos fall back to text; Headlines only stays text-only. Refresh existing feeds to discover their images. Opening a short entry or choosing Load reader view fetches that publisher page (up to 5 MB, 20-second timeout). Reader view extracts text without executing publisher scripts or rendering their HTML; results are kept in memory until Dispatch closes. It does not bypass subscriptions. Opening an original article delegates to your browser. Feed availability and publisher formats may change. This app is independent of the publications.
 
 ## Remove
 

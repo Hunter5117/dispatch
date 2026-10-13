@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'none'; connect-src 'none'; font-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src https: http:; connect-src 'none'; font-src 'self'">
 <title>Dispatch</title><link rel="stylesheet" href="style.css"></head>
 <body>
 <aside>
@@ -14,7 +14,7 @@
 <main>
  <header><div><span class="eyebrow" id="date"></span><h1 id="heading">Your briefing<span>.</span></h1><p id="subtitle">A quieter place to catch up.</p></div>
  <button id="refresh" class="secondary">↻ <span>Refresh</span></button></header>
- <div class="tools"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search headlines and sources…" aria-label="Search headlines"></label><button id="compact" class="secondary" title="Toggle compact layout">☷ <span>Compact</span></button><button id="read-all" class="secondary">✓ <span>Mark read</span></button></div>
+ <div class="tools"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search headlines and sources…" aria-label="Search headlines"></label><button id="settings" class="secondary" title="Reading preferences">☷ <span>Layout &amp; photos</span></button><button id="read-all" class="secondary">✓ <span>Mark read</span></button></div>
  <div id="notice" role="status" hidden></div>
  <section id="featured" hidden></section>
  <div class="section-heading"><span id="section-label">LATEST STORIES</span><span id="results"></span></div>
@@ -22,6 +22,13 @@
  <div id="empty" hidden><span>◫</span><h2>Nothing here yet.</h2><p>Refresh your sources or add a new feed.</p><button class="primary" id="empty-add">Add a source</button></div>
  <footer>Headlines and excerpts from your sources. Original reporting belongs to its publishers.<span>↻ Updates every 5 minutes</span></footer>
 </main>
+<dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-top"><div><span class="eyebrow">MAKE IT YOURS</span><h2 id="settings-title">Reading preferences</h2></div><button class="icon" id="close-settings" aria-label="Close reading preferences">×</button></div><p>Same Dispatch. Your way to catch up.</p>
+<fieldset id="layouts"><legend>Layout</legend>
+<label class="layout-option"><input type="radio" name="layout" value="briefing"><span><strong>Briefing</strong><small>The familiar two-column digest with a lead story.</small></span></label>
+<label class="layout-option"><input type="radio" name="layout" value="cards"><span><strong>Wide blocks</strong><small>Roomier cards with larger headlines and excerpts.</small></span></label>
+<label class="layout-option"><input type="radio" name="layout" value="feed"><span><strong>Feed</strong><small>One flowing column with excerpts and photo thumbnails.</small></span></label>
+<label class="layout-option"><input type="radio" name="layout" value="headlines"><span><strong>Headlines only</strong><small>A compact list for a quick scan.</small></span></label>
+</fieldset><label class="photo-option"><input type="checkbox" id="photos"><span>Show story photos</span></label><p class="muted">Loads available photos from publishers and their image hosts. Some sources provide headlines only. Headlines-only view stays text-only.</p><p class="muted">Changes save automatically for your next visit.</p></dialog>
 <dialog id="feed-dialog"><form id="feed-form"><div class="dialog-top"><div><span class="eyebrow">MAKE IT YOURS</span><h2>Add a source</h2></div><button type="button" class="icon" id="close-feed" aria-label="Close">×</button></div><p>Follow any site with an RSS or Atom feed.</p><label>Name<input id="feed-name" placeholder="My favorite publication" maxlength="70"></label><label>Feed URL<input id="feed-url" type="url" placeholder="https://example.com/feed.xml" required></label><div id="feed-notice" role="status"></div><button class="primary" type="submit">Add source →</button><div class="dialog-rule"></div><span class="eyebrow">YOUR SUBSCRIPTIONS</span><div id="manage-feeds"></div><p class="muted">Removing a source keeps its saved stories.</p></form></dialog>
-<dialog id="article-dialog"><div class="article-actions"><button id="close-article" class="secondary">← Back to headlines</button><button id="article-save" class="secondary">☆ Save</button></div><div id="article-source" class="eyebrow"></div><h2 id="article-title"></h2><div id="article-body"></div><button id="article-open" class="primary">Read original article ↗</button><p class="muted">Feed excerpt · Opens in your browser</p></dialog>
+<dialog id="article-dialog"><div class="article-actions"><button id="close-article" class="secondary">← Back to headlines</button><button id="article-save" class="secondary">☆ Save</button></div><div id="article-source" class="eyebrow"></div><h2 id="article-title"></h2><p id="article-status" class="muted" role="status"></p><div id="article-body"></div><button id="article-load" class="secondary">Load reader view</button><button id="article-open" class="primary">Read original article ↗</button><p class="muted">Reader view uses available publisher text. Some articles require the original site.</p></dialog>
 <script src="app.js"></script></body></html>

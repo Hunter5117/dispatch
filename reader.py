@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
 SOURCE = 'https://www.drudgereport.com/'
+DRUDGE_RSS = 'https://feedpress.me/drudgereportfeed'
 ROOT = Path(__file__).resolve().parent
 DATA = Path.home() / '.local/share/omarchy-news'
 CACHE = Path.home() / '.cache/omarchy-news'
@@ -102,7 +103,7 @@ from email.utils import parsedate_to_datetime
 import xml.etree.ElementTree as ET
 
 DEFAULT_FEEDS = [
-    {'id':'drudge','name':'Drudge Report','url':SOURCE,'kind':'drudge'},
+    {'id':'drudge','name':'Drudge Report','url':DRUDGE_RSS,'kind':'rss','fallback_url':SOURCE},
     {'id':'bbc','name':'BBC World','url':'https://feeds.bbci.co.uk/news/world/rss.xml','kind':'rss'},
     {'id':'guardian','name':'The Guardian','url':'https://www.theguardian.com/world/rss','kind':'rss'},
     {'id':'npr','name':'NPR News','url':'https://feeds.npr.org/1001/rss.xml','kind':'rss'},
@@ -124,14 +125,131 @@ class PlainText(HTMLParser):
 
 def plain(value):
     p = PlainText()
-    p.feed(value or '')
-    return '\n\n'.join(re.sub(r'\s+',' ',line).strip() for line in ''.join(p.parts).splitlines() if line.strip())[:20000]
+    p.feed(re.sub(r'(<\/?)[\w]+:',r'\1',value or ''))
+    return '\n\n'.join(re.sub(r'\s+',' ',line).strip() for line in ''.join(p.parts).splitlines() if line.strip())[:200000]
+
+class ArticleText(HTMLParser):
+    """Collect prose from article/main containers, never render publisher HTML."""
+    VOID = {'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}
+    SKIP = {'script','style','nav','header','footer','aside','form','button','noscript','svg'}
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.candidates = []
+        self.paragraph = None
+        self.jsonld = None
+        self.structured = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        hidden = (self.stack[-1][1] if self.stack else False) or tag in self.SKIP
+        if tag == 'script' and attrs.get('type','').lower() == 'application/ld+json':
+            self.jsonld = []
+        if tag in self.VOID:
+            if tag == 'br' and self.paragraph is not None: self.paragraph.append(' ')
+            return
+        hint = attrs.get('class','') + ' ' + attrs.get('id','') + ' ' + attrs.get('itemprop','')
+        candidate = None
+        if not hidden and (tag in ('article','main') or re.search(r'article[-_ ]?(body|content)|story[-_ ]?(body|content)|entry-content|articleBody',hint,re.I)):
+            candidate = []
+            self.candidates.append((3 if tag == 'article' or 'articleBody' in hint else 2, candidate))
+        self.stack.append((tag,hidden,candidate))
+        if not hidden and tag in ('p','h2','h3','blockquote','li'):
+            self.finish_paragraph()
+            self.paragraph = []
+
+    def handle_data(self, value):
+        if self.jsonld is not None: self.jsonld.append(value)
+        if self.paragraph is not None and self.stack and not self.stack[-1][1]:
+            self.paragraph.append(value)
+
+    def finish_paragraph(self):
+        if self.paragraph is None: return
+        text = re.sub(r'\s+',' ',''.join(self.paragraph)).strip()
+        if text:
+            for _, hidden, candidate in self.stack:
+                if candidate is not None and not hidden: candidate.append(text)
+        self.paragraph = None
+
+    def handle_endtag(self, tag):
+        if tag == 'script' and self.jsonld is not None:
+            try: self.structured.append(json.loads(''.join(self.jsonld)))
+            except ValueError: pass
+            self.jsonld = None
+        if tag in ('p','h2','h3','blockquote','li','article','main','div'): self.finish_paragraph()
+        for i in range(len(self.stack)-1,-1,-1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                break
+
+    def text(self):
+        self.finish_paragraph()
+        def bodies(value):
+            if isinstance(value,dict):
+                if isinstance(value.get('articleBody'),str): yield plain(value['articleBody'])
+                for child in value.values(): yield from bodies(child)
+            elif isinstance(value,list):
+                for child in value: yield from bodies(child)
+        options = [text for value in self.structured for text in bodies(value)]
+        options += ['\n\n'.join(parts) for _,parts in self.candidates]
+        body = max(options,key=len,default='')
+        if len(body) < 300: raise ValueError('This publisher did not provide readable article text. The feed text is still available below.')
+        return body[:200000]
+
+def fetch_article(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in ('https','http') or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('Unsupported article URL')
+    request = Request(url, headers={'User-Agent':'Mozilla/5.0 Dispatch/1.0', 'Accept':'text/html'})
+    with urlopen(request,timeout=20) as response:
+        if response.headers.get_content_type() not in ('text/html','application/xhtml+xml'):
+            raise ValueError('This link is not an HTML article.')
+        raw = response.read(5_000_001)
+        if len(raw) > 5_000_000: raise ValueError('Article page is too large.')
+        html = raw.decode(response.headers.get_content_charset() or 'utf-8',errors='replace')
+    parser = ArticleText()
+    parser.feed(html)
+    return parser.text()
 
 def timestamp(value):
     try: return parsedate_to_datetime(value).timestamp()
     except (ValueError, TypeError, OverflowError):
         try: return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
         except (ValueError, TypeError, AttributeError): return 0
+
+class ImageLinks(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.urls = []
+    def handle_starttag(self, tag, attrs):
+        if tag == 'img':
+            attrs = dict(attrs)
+            if any(re.fullmatch(r'[012](?:px)?', attrs.get(d, '').strip()) for d in ('width','height')):
+                return
+            self.urls.append(attrs.get('src', ''))
+
+def story_image(entry, base, markup):
+    candidates = []
+    for child in entry.iter():
+        tag = child.tag.rsplit('}', 1)[-1]
+        if child.tag.startswith('{http://search.yahoo.com/mrss/}') and tag in ('thumbnail', 'content'):
+            if tag == 'thumbnail' or child.get('medium') == 'image' or child.get('type', '').startswith('image/') or not child.get('type') and not child.get('medium'):
+                candidates.append(child.get('url', ''))
+        elif tag in ('enclosure', 'link') and child.get('type', '').startswith('image/'):
+            candidates.append(child.get('url') or child.get('href', ''))
+    images = ImageLinks()
+    images.feed(markup)
+    candidates.extend(images.urls)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        url = urljoin(base, candidate)
+        parsed = urlparse(url)
+        if parsed.hostname == 'feedpress.me' and parsed.path.startswith('/link/') and parsed.path.endswith('.gif'):
+            continue
+        if parsed.scheme in ('https', 'http') and parsed.hostname and not parsed.username and not parsed.password:
+            return url
+    return ''
 
 def parse_feed(data, feed):
     if b'<!DOCTYPE' in data.upper() or b'<!ENTITY' in data.upper():
@@ -146,7 +264,7 @@ def parse_feed(data, feed):
             if child.tag.startswith('{http://search.yahoo.com/mrss/}'):
                 continue
             tag = local(child.tag)
-            value = ''.join(child.itertext()).strip()
+            value = (''.join(ET.tostring(part, encoding='unicode') for part in child) if tag in ('content','summary') and len(child) else ''.join(child.itertext())).strip()
             values[tag] = value
             if tag == 'link':
                 if child.get('rel','alternate') == 'alternate':
@@ -156,15 +274,24 @@ def parse_feed(data, feed):
         title = plain(values.get('title','')).replace('\n',' ')
         if not title: continue
         seen.add(url)
-        body = plain(values.get('encoded') or values.get('content') or values.get('description') or values.get('summary',''))
+        markup = values.get('encoded') or values.get('content') or values.get('description') or values.get('summary','')
+        body = plain(markup)
         stories.append({'id':hashlib.sha256(url.encode()).hexdigest()[:20], 'title':title,'url':url,
-                        'source':feed['name'], 'feed_id':feed['id'], 'body':body,
+                        'source':feed['name'], 'feed_id':feed['id'], 'body':body, 'image':story_image(entry, url, markup),
                         'published':timestamp(values.get('pubDate') or values.get('published') or values.get('updated')),
                         'lead':False})
     if not stories: raise ValueError('No RSS or Atom stories found at this URL')
     return stories[:150]
 
 def fetch_feed(feed):
+    try:
+        return fetch_feed_once(feed)
+    except Exception:
+        if feed.get('url') != DRUDGE_RSS or feed.get('fallback_url') != SOURCE:
+            raise
+        return fetch_feed_once({**feed,'url':SOURCE,'kind':'drudge'})
+
+def fetch_feed_once(feed):
     request = Request(feed['url'],headers={'User-Agent':'Mozilla/5.0 OmarchyNews/1.0'})
     with urlopen(request,timeout=20) as response:
         data = response.read(5_000_001)
@@ -190,10 +317,16 @@ class Reader(Gtk.Application):
         self.ready=False
         self.fetching=False
         self.feeds=read_json(DATA/'feeds.json',DEFAULT_FEEDS)
+        for feed in self.feeds:
+            if feed.get('id')=='drudge' and feed.get('url')==SOURCE and feed.get('kind')=='drudge':
+                feed.update(url=DRUDGE_RSS,kind='rss',fallback_url=SOURCE)
+                write_json(DATA/'feeds.json',self.feeds)
         self.cache=read_json(CACHE/'feeds.json',{})
         self.state=read_json(DATA/'state.json',{'read':[],'saved':{},'compact':False})
         self.errors={}
         self.notice=None
+        self.articles={}
+        self.article_loading=set()
 
     def do_activate(self):
         if self.window:
@@ -249,16 +382,25 @@ class Reader(Gtk.Application):
             elif action=='remove':
                 self.feeds=[f for f in self.feeds if f['id']!=m.get('id')]
                 write_json(DATA/'feeds.json',self.feeds)
+            elif action=='preferences':
+                if m.get('layout') in ('briefing', 'cards', 'feed', 'headlines'):
+                    self.state['layout'] = m['layout']
+                    self.state['compact'] = m['layout'] == 'headlines'
+                if isinstance(m.get('photos'), bool):
+                    self.state['photos'] = m['photos']
             elif action=='compact':
                 self.state['compact']=not self.state.get('compact',False)
+                self.state['layout']='headlines' if self.state['compact'] else 'briefing'
             elif action=='mark_all':
                 ids=m.get('ids',[])
                 valid={s['id'] for s in self.stories()}
                 self.state['read']=list(set(self.state['read'])|{i for i in ids if i in valid})[-5000:]
-            elif action in ('open','save','read'):
+            elif action in ('open','save','read','article'):
                 story=next((s for s in self.stories()+list(self.state['saved'].values()) if s['id']==m.get('id')),None)
                 if not story:return
                 sid=story['id']
+                if action=='article':
+                    self.load_article(story);return
                 if action=='save':
                     if sid in self.state['saved']:del self.state['saved'][sid]
                     else:self.state['saved'][sid]=story
@@ -270,6 +412,24 @@ class Reader(Gtk.Application):
             self.emit()
         except (ValueError,KeyError,TypeError,OSError) as exc:
             self.notice=str(exc);self.emit()
+
+    def load_article(self,story):
+        sid=story['id']
+        if sid in self.articles:
+            self.article_result(sid,self.articles[sid],None);return
+        if sid in self.article_loading:return
+        self.article_loading.add(sid)
+        def load():
+            try:GLib.idle_add(self.article_result,sid,fetch_article(story['url']),None)
+            except Exception as exc:GLib.idle_add(self.article_result,sid,None,'Could not load reader view: '+str(exc))
+        threading.Thread(target=load,daemon=True).start()
+
+    def article_result(self,sid,body,error):
+        self.article_loading.discard(sid)
+        if body:self.articles[sid]=body
+        if self.ready:
+            self.evaluate('window.receiveArticle('+json.dumps({'id':sid,'body':body,'error':error})+')')
+        return False
 
     def add_feed(self,m):
         url=m.get('url','').strip()
