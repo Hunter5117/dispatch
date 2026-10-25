@@ -59,3 +59,17 @@ body[data-pane=nav][data-layout=cards] #stories .story.cursor{border-color:var(-
   }
   #article-body{font-size:20px;line-height:1.85}
 }
+
+/* Headlines only: story cards show the source line and headline, no excerpt. */
+.story{min-height:0}.story-bottom{justify-content:flex-end}
+/* Tighter story spacing (font sizes unchanged). The save button sits on the source line instead of its own row. */
+.story{position:relative;padding:10px 0 8px}
+.story h3{margin:4px 0 0;padding-right:34px}
+.story-bottom{position:absolute;top:6px;right:0;margin:0}
+.save{padding:0 4px;line-height:1}
+.story-photo{margin-bottom:8px}
+.compact .story{padding:8px 0}.compact .story h3{margin:3px 0 0}
+body[data-layout=cards] .story{padding:12px 14px}body[data-layout=cards] .story-bottom{top:10px;right:10px}
+body[data-layout=feed] .story{padding:12px 0}
+#featured{padding:16px 20px;margin-bottom:18px}#featured .feature-label{margin-bottom:6px}#featured h2{margin:6px 0 4px}
+.section-heading{margin-bottom:8px}

@@ -70,7 +70,7 @@ $('article-load').onclick=requestArticle;
 function layout(){return data.state.layout|| (data.state.compact?'headlines':'briefing')}
 function unsafeImageHost(host){const name=String(host||'').replace(/^\[|\]$/g,'').split('%')[0].toLowerCase();if(!name||name==='localhost'||name.endsWith('.localhost')||name.endsWith('.local'))return true;if(/^(?:\d+|0x[0-9a-f]+)$/i.test(name))return true;const v4=/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(name);if(v4){const parts=v4.slice(1);if(parts.some(part=>part.length>1&&part.startsWith('0')))return true;const n=parts.map(Number);if(n.some(part=>part>255))return true;const a=n[0],b=n[1];return a===0||a===10||a===127||a>=224||(a===169&&b===254)||(a===172&&b>=16&&b<=31)||(a===192&&b===168)||(a===100&&b>=64&&b<=127)||(a===192&&b===0)||(a===198&&(b===18||b===19))||(a===203&&b===0&&n[2]===113)}if(name.includes(':')){if(name==='::'||name==='::1'||name.startsWith('fe80:')||name.startsWith('fc')||name.startsWith('fd'))return true;if(name.startsWith('::ffff:'))return unsafeImageHost(name.slice(7))}return false}
 function photo(story){if(!data.state.photos||layout()==='headlines'||!story.image)return null;let url;try{url=new URL(story.image)}catch{return null}if(!['https:','http:'].includes(url.protocol)||url.username||url.password||unsafeImageHost(url.hostname))return null;const img=el('img','story-photo');img.alt='';img.loading='lazy';img.referrerPolicy='no-referrer';img.onerror=()=>img.remove();img.src=url.href;return img}
-function storyCard(story){const card=el('article','story'+(data.state.read.includes(story.id)?' is-read':'')+(story.id===storyCursor?' cursor':''));card.dataset.story=story.id;const button=el('button','headline');button.tabIndex=story.id===storyCursor?0:-1;button.append(el('h3','',story.title));button.onclick=()=>openStory(story);const bottom=el('div','story-bottom');bottom.append(el('p','summary',(story.body||'Open the headline to read at the original source.').replace(/\s+/g,' ')),saveButton(story));const image=photo(story);if(image)card.append(image);card.append(metadata(story),button,bottom);return card}
+function storyCard(story){const card=el('article','story'+(data.state.read.includes(story.id)?' is-read':'')+(story.id===storyCursor?' cursor':''));card.dataset.story=story.id;const button=el('button','headline');button.tabIndex=story.id===storyCursor?0:-1;button.append(el('h3','',story.title));button.onclick=()=>openStory(story);const bottom=el('div','story-bottom');bottom.append(saveButton(story));const image=photo(story);if(image)card.append(image);card.append(metadata(story),button,bottom);return card}
 function closedSet(){return new Set(data.state.closed||[])}
 function isClosed(id){return closedSet().has(id)}
 function treeFocus(){const node=document.activeElement;return !!(node&&($('sources').contains(node)||$('source-heading').contains(node)))}
@@ -231,7 +231,7 @@ function render(restoreTree){
     const image=photo(lead);
     if(image)featured.append(image);
     featured.append(el('div','feature-label',lead.lead?'DRUDGE · LEAD HEADLINE':'TOP OF YOUR BRIEFING'),button);
-    if(lead.body)featured.append(el('p','excerpt',lead.body.replace(/\s+/g,' ').slice(0,210)+(lead.body.length>210?'…':'')));
+    
     featured.append(bottom);
   }else{delete featured.dataset.story;featured.classList.remove('cursor')}
   $('section-label').textContent=view==='saved'?'YOUR READING LIST':query?'SEARCH RESULTS':folder?'IN THIS FOLDER':'LATEST STORIES';$('results').textContent=visible.length+' stories';
