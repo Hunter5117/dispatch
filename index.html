@@ -6,9 +6,9 @@
 <aside>
  <div class="brand"><span class="brand-icon">◫</span><div>dispatch<small>OMARCHY NEWS READER</small></div></div>
  <div class="nav-label">LIBRARY</div>
- <nav id="library"></nav>
- <div class="source-heading"><span class="nav-label">YOUR SOURCES</span><button class="icon" id="add" aria-label="Add source" title="Add source">＋</button></div>
- <nav id="sources"></nav>
+ <nav id="library" title="Up and down move. Enter chooses All, Unread, or Saved."></nav>
+ <div class="source-heading" id="source-heading" tabindex="0" title="Right-click, or press m, to organize. Ctrl+Right jumps to headlines."><span class="nav-label">YOUR SOURCES</span><button class="icon" id="add" aria-label="Add source" title="Add source">＋</button></div>
+ <nav id="sources" role="tree" aria-label="Your sources" title="Up and down move. Left and right fold. Enter shows that source. Ctrl+Right jumps to headlines. M organizes."></nav>
  <div class="sidebar-bottom"><span class="status-dot"></span><span id="sync">Ready to read</span><small>Local library · No account needed</small></div>
 </aside>
 <main>
@@ -18,7 +18,7 @@
  <div id="notice" role="status" hidden></div>
  <section id="featured" hidden></section>
  <div class="section-heading"><span id="section-label">LATEST STORIES</span><span id="results"></span></div>
- <section id="stories" aria-label="Headlines"></section>
+ <section id="stories" tabindex="-1" aria-label="Headlines" title="Up and down move. Enter reads. S saves. Ctrl+Left returns to sources."></section>
  <div id="empty" hidden><span>◫</span><h2>Nothing here yet.</h2><p>Refresh your sources or add a new feed.</p><button class="primary" id="empty-add">Add a source</button></div>
  <footer>Headlines and excerpts from your sources. Original reporting belongs to its publishers.<span>↻ Updates every 5 minutes</span></footer>
 </main>
@@ -29,6 +29,9 @@
 <label class="layout-option"><input type="radio" name="layout" value="feed"><span><strong>Feed</strong><small>One flowing column with excerpts and photo thumbnails.</small></span></label>
 <label class="layout-option"><input type="radio" name="layout" value="headlines"><span><strong>Headlines only</strong><small>A compact list for a quick scan.</small></span></label>
 </fieldset><label class="photo-option"><input type="checkbox" id="photos"><span>Show story photos</span></label><p class="muted">Loads available photos from publishers and their image hosts. Some sources provide headlines only. Headlines-only view stays text-only.</p><p class="muted">Changes save automatically for your next visit.</p></dialog>
-<dialog id="feed-dialog"><form id="feed-form"><div class="dialog-top"><div><span class="eyebrow">MAKE IT YOURS</span><h2>Add a source</h2></div><button type="button" class="icon" id="close-feed" aria-label="Close">×</button></div><p>Follow any site with an RSS or Atom feed.</p><label>Name<input id="feed-name" placeholder="My favorite publication" maxlength="70"></label><label>Feed URL<input id="feed-url" type="url" placeholder="https://example.com/feed.xml" required></label><div id="feed-notice" role="status"></div><button class="primary" type="submit">Add source →</button><div class="dialog-rule"></div><span class="eyebrow">YOUR SUBSCRIPTIONS</span><div id="manage-feeds"></div><p class="muted">Removing a source keeps its saved stories.</p></form></dialog>
+<dialog id="feed-dialog"><form id="feed-form"><div class="dialog-top"><div><span class="eyebrow">MAKE IT YOURS</span><h2>Add a source</h2></div><button type="button" class="icon" id="close-feed" aria-label="Close">×</button></div><p>Follow any site with an RSS or Atom feed.</p><p id="feed-place" class="muted">Added at the top level.</p><label>Name<input id="feed-name" placeholder="My favorite publication" maxlength="70"></label><label>Feed URL<input id="feed-url" type="url" placeholder="https://example.com/feed.xml" required></label><div id="feed-notice" role="status"></div><button class="primary" type="submit">Add source →</button></form></dialog>
+<dialog id="manage-menu" aria-label="Organize"></dialog>
+<dialog id="name-dialog" aria-labelledby="name-title"><form id="name-form"><div class="dialog-top"><div><span class="eyebrow">ORGANIZE</span><h2 id="name-title">Folder</h2></div><button type="button" class="icon" id="close-name" aria-label="Close">×</button></div><label>Name<input id="name-input" maxlength="70" required></label><div id="name-notice" role="status"></div><button class="primary" type="submit">Save</button></form></dialog>
+<dialog id="move-dialog" aria-labelledby="move-title"><form id="move-form"><div class="dialog-top"><div><span class="eyebrow">ORGANIZE</span><h2 id="move-title">Move</h2></div><button type="button" class="icon" id="close-move" aria-label="Close">×</button></div><label>Destination<select id="move-parent"></select></label><div id="move-notice" role="status"></div><button class="primary" type="submit">Move</button></form></dialog>
 <dialog id="article-dialog"><div class="article-actions"><button id="close-article" class="secondary">← Back to headlines</button><button id="article-save" class="secondary">☆ Save</button></div><div id="article-source" class="eyebrow"></div><h2 id="article-title"></h2><p id="article-status" class="muted" role="status"></p><div id="article-body"></div><button id="article-load" class="secondary">Load reader view</button><button id="article-open" class="primary">Read original article ↗</button><p class="muted">Reader view uses available publisher text. Some articles require the original site.</p></dialog>
 <script src="app.js"></script></body></html>

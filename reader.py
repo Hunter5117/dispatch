@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """A local Omarchy-themed RSS, Atom, and Drudge news reader."""
 import hashlib
+import http.client
 from html.parser import HTMLParser
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import secrets
+import socket
 import subprocess
 import threading
 import time
 import tomllib
+from urllib.error import HTTPError
 from urllib.parse import urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, HTTPHandler, HTTPRedirectHandler, Request, build_opener
+import xml.parsers.expat as expat
 
 SOURCE = 'https://www.drudgereport.com/'
 DRUDGE_RSS = 'https://feedpress.me/drudgereportfeed'
@@ -109,6 +115,134 @@ DEFAULT_FEEDS = [
     {'id':'npr','name':'NPR News','url':'https://feeds.npr.org/1001/rss.xml','kind':'rss'},
     {'id':'ars','name':'Ars Technica','url':'https://feeds.arstechnica.com/arstechnica/index','kind':'rss'},
 ]
+MAX_FOLDER_DEPTH = 6
+
+def clean_name(value):
+    name = ' '.join(str(value or '').split())
+    if not name:
+        raise ValueError('Enter a name.')
+    return name[:70]
+
+def new_folder_id():
+    return 'fld_' + secrets.token_hex(6)
+
+def _parent(item):
+    parent = item.get('parent') if isinstance(item, dict) else ''
+    return parent if isinstance(parent, str) else ''
+
+def folder_depth(folders, folder_id):
+    if not folder_id:
+        return 0
+    by_id = {folder['id']: folder for folder in folders}
+    if folder_id not in by_id:
+        raise ValueError('That folder is no longer there.')
+    seen, current, depth = set(), folder_id, 0
+    while current:
+        if current in seen:
+            raise ValueError('That folder contains itself.')
+        seen.add(current)
+        depth += 1
+        if depth > MAX_FOLDER_DEPTH:
+            raise ValueError('That folder is nested too deeply.')
+        current = _parent(by_id.get(current) or {})
+    return depth
+
+def descendant_folders(folders, folder_id):
+    found, stack = set(), [folder_id]
+    while stack:
+        current = stack.pop()
+        for folder in folders:
+            if _parent(folder) == current and folder['id'] not in found:
+                found.add(folder['id'])
+                stack.append(folder['id'])
+    return found
+
+def subtree_depth(folders, folder_id):
+    children = [folder['id'] for folder in folders if _parent(folder) == folder_id]
+    if not children:
+        return 0
+    return 1 + max(subtree_depth(folders, child) for child in children)
+
+def assert_new_parent(folders, parent):
+    if parent and not any(folder['id'] == parent for folder in folders):
+        raise ValueError('That folder is no longer there.')
+    if folder_depth(folders, parent) + 1 > MAX_FOLDER_DEPTH:
+        raise ValueError('That folder is nested too deeply.')
+
+def assert_move_folder(folders, folder_id, parent):
+    if parent == folder_id or parent in descendant_folders(folders, folder_id):
+        raise ValueError('A folder cannot sit inside itself.')
+    assert_new_parent(folders, parent)
+    if folder_depth(folders, parent) + 1 + subtree_depth(folders, folder_id) > MAX_FOLDER_DEPTH:
+        raise ValueError('That folder is nested too deeply.')
+
+def normalize_feed(feed):
+    if not isinstance(feed, dict) or not isinstance(feed.get('url'), str) or not feed.get('url'):
+        return None
+    item = {
+        'id': str(feed.get('id') or hashlib.sha256(feed['url'].encode()).hexdigest()[:12]),
+        'name': str(feed.get('name') or '')[:70],
+        'url': feed['url'],
+        'kind': str(feed.get('kind') or 'rss'),
+        'parent': _parent(feed),
+    }
+    if isinstance(feed.get('fallback_url'), str) and feed.get('fallback_url'):
+        item['fallback_url'] = feed['fallback_url']
+    return item
+
+def normalize_folder(folder):
+    if not isinstance(folder, dict) or not isinstance(folder.get('id'), str) or not folder.get('id'):
+        return None
+    return {'id': folder['id'][:24], 'name': str(folder.get('name') or 'Folder')[:70] or 'Folder', 'parent': _parent(folder)}
+
+def repair_library(folders, feeds):
+    kept, seen = [], set()
+    for folder in folders:
+        if folder['id'] in seen:
+            continue
+        seen.add(folder['id'])
+        kept.append(folder)
+    folders = kept
+    ids = {folder['id'] for folder in folders}
+    for folder in folders:
+        if folder['parent'] not in ids:
+            folder['parent'] = ''
+    for folder in folders:
+        try:
+            folder_depth(folders, folder['id'])
+        except ValueError:
+            folder['parent'] = ''
+    seen_feeds = set()
+    clean_feeds = []
+    for feed in feeds:
+        if feed['id'] in seen_feeds:
+            continue
+        seen_feeds.add(feed['id'])
+        if feed['parent'] not in ids:
+            feed['parent'] = ''
+        clean_feeds.append(feed)
+    return folders, clean_feeds
+
+def load_library(data):
+    """Accept the older flat feed list and the version-2 folder library."""
+    if isinstance(data, list):
+        feeds = [item for item in (normalize_feed(feed) for feed in data) if item]
+        return repair_library([], feeds)
+    if isinstance(data, dict) and isinstance(data.get('feeds'), list):
+        folders = [item for item in (normalize_folder(folder) for folder in data.get('folders') or []) if item]
+        feeds = [item for item in (normalize_feed(feed) for feed in data['feeds']) if item]
+        return repair_library(folders, feeds)
+    raise ValueError('Feed library could not be read.')
+
+def remove_folder(folders, feeds, folder_id):
+    folder = next((item for item in folders if item['id'] == folder_id), None)
+    if folder is None:
+        raise ValueError('That folder is no longer there.')
+    parent = _parent(folder)
+    for item in folders + feeds:
+        if _parent(item) == folder_id:
+            item['parent'] = parent
+    folders.remove(folder)
 
 class PlainText(HTMLParser):
     def __init__(self):
@@ -197,11 +331,7 @@ class ArticleText(HTMLParser):
         return body[:200000]
 
 def fetch_article(url):
-    parsed = urlparse(url)
-    if parsed.scheme not in ('https','http') or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError('Unsupported article URL')
-    request = Request(url, headers={'User-Agent':'Mozilla/5.0 Dispatch/1.0', 'Accept':'text/html'})
-    with urlopen(request,timeout=20) as response:
+    with open_public_url(url, headers={'User-Agent':'Mozilla/5.0 Dispatch/1.0', 'Accept':'text/html'}) as response:
         if response.headers.get_content_type() not in ('text/html','application/xhtml+xml'):
             raise ValueError('This link is not an HTML article.')
         raw = response.read(5_000_001)
@@ -216,6 +346,176 @@ def timestamp(value):
     except (ValueError, TypeError, OverflowError):
         try: return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
         except (ValueError, TypeError, AttributeError): return 0
+
+def address_is_public(ip):
+    mapped = getattr(ip, 'ipv4_mapped', None)
+    if mapped is not None:
+        ip = mapped
+    # is_global is true for multicast. Those addresses are not article or feed hosts.
+    return bool(ip.is_global) and not ip.is_multicast
+
+def _resolve_host(host, port):
+    result = {}
+    def run():
+        try:
+            result['infos'] = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except BaseException as exc:
+            result['error'] = exc
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(5)
+    if thread.is_alive():
+        raise TimeoutError('Could not resolve host')
+    if 'error' in result:
+        raise result['error']
+    return result.get('infos') or []
+
+def public_addresses(host, port):
+    host = host.strip()
+    if not host or '\x00' in host:
+        raise ValueError('Unsupported URL')
+    literal = host.split('%', 1)[0]
+    try:
+        ip = ipaddress.ip_address(literal)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if not address_is_public(ip):
+            raise ValueError('URL host is not a public address')
+        return [literal]
+    try:
+        infos = _resolve_host(host, port)
+    except (socket.gaierror, TimeoutError, UnicodeError) as exc:
+        raise ValueError('Could not resolve host') from exc
+    found = []
+    for info in infos:
+        ip = ipaddress.ip_address(str(info[4][0]).split('%', 1)[0])
+        if not address_is_public(ip):
+            raise ValueError('URL host is not a public address')
+        found.append(str(info[4][0]).split('%', 1)[0])
+    if not found:
+        raise ValueError('Could not resolve host')
+    return list(dict.fromkeys(found))
+
+def ensure_public_http_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https') or parsed.username or parsed.password or not parsed.hostname:
+        raise ValueError('Unsupported URL')
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError('Unsupported URL') from exc
+    if port == 0:
+        raise ValueError('Unsupported URL')
+    public_addresses(parsed.hostname, port or (443 if parsed.scheme == 'https' else 80))
+    return url
+
+def public_http_url(url):
+    try:
+        ensure_public_http_url(url)
+    except ValueError:
+        return False
+    return True
+
+def image_host_is_blocked_offline(url):
+    """Block image hosts that are unsafe without a DNS lookup. Other names are checked when fetched."""
+    if not isinstance(url, str) or not url:
+        return True
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if parsed.scheme not in ('http', 'https') or not host or parsed.username or parsed.password:
+        return True
+    bare = host.lower().rstrip('.')
+    if bare in ('localhost', 'localhost.localdomain') or bare.endswith('.localhost') or bare.endswith('.local'):
+        return True
+    if re.fullmatch(r'(?:\d+|0x[0-9a-f]+)', bare):
+        return True
+    if re.fullmatch(r'(?:\d{1,3}\.){3}\d{1,3}', bare) and any(len(part) > 1 and part.startswith('0') for part in bare.split('.')):
+        return True
+    try:
+        ip = ipaddress.ip_address(bare.split('%', 1)[0])
+    except ValueError:
+        return False
+    return not address_is_public(ip)
+
+def hide_blocked_images(stories):
+    for story in stories:
+        if isinstance(story, dict) and story.get('image') and image_host_is_blocked_offline(story['image']):
+            story['image'] = ''
+
+def _connect_public(address, timeout, source_address):
+    host, port = address
+    error = None
+    for ip in public_addresses(host, port):
+        try:
+            return socket.create_connection((ip, port), timeout, source_address)
+        except OSError as exc:
+            error = exc
+    if error is not None:
+        raise error
+    raise OSError('Could not connect')
+
+class PublicHTTPConnection(http.client.HTTPConnection):
+    def connect(self):
+        # A proxy connection uses the proxy host. Direct connections pin the resolved public address.
+        if not self._tunnel_host:
+            self._create_connection = _connect_public
+        super().connect()
+
+class PublicHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        if not self._tunnel_host:
+            self._create_connection = _connect_public
+        super().connect()
+
+class PublicHTTPHandler(HTTPHandler):
+    def http_open(self, req):
+        ensure_public_http_url(req.full_url)
+        connection = http.client.HTTPConnection if req.has_proxy() else PublicHTTPConnection
+        return self.do_open(connection, req)
+
+class PublicHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        ensure_public_http_url(req.full_url)
+        connection = http.client.HTTPSConnection if req.has_proxy() else PublicHTTPSConnection
+        return self.do_open(connection, req, context=self._context)
+
+class PublicRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urlparse(newurl)
+        if parsed.scheme not in ('http', 'https'):
+            raise HTTPError(newurl, code, 'Redirection to this URL is not allowed', headers, fp)
+        try:
+            ensure_public_http_url(newurl)
+        except ValueError as exc:
+            raise HTTPError(newurl, code, str(exc), headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+_OPENER = build_opener(PublicHTTPHandler(), PublicHTTPSHandler(), PublicRedirectHandler())
+
+def open_public_url(url, headers=None, timeout=20):
+    ensure_public_http_url(url)
+    try:
+        return _OPENER.open(Request(url, headers=headers or {}), timeout=timeout)
+    except HTTPError as exc:
+        exc.close()
+        raise
+
+def reject_xml_entities(data):
+    """Reject entity declarations after the parser decodes the document, including UTF-16."""
+    parser = expat.ParserCreate()
+    def forbid(*_args):
+        raise ValueError('Unsupported XML entity declarations')
+    parser.EntityDeclHandler = forbid
+    parser.UnparsedEntityDeclHandler = forbid
+    parser.ExternalEntityRefHandler = forbid
+    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
+    try:
+        parser.Parse(data, True)
+    except ValueError:
+        raise
+    except expat.ExpatError:
+        return
 
 class ImageLinks(HTMLParser):
     def __init__(self):
@@ -247,13 +547,12 @@ def story_image(entry, base, markup):
         parsed = urlparse(url)
         if parsed.hostname == 'feedpress.me' and parsed.path.startswith('/link/') and parsed.path.endswith('.gif'):
             continue
-        if parsed.scheme in ('https', 'http') and parsed.hostname and not parsed.username and not parsed.password:
+        if public_http_url(url):
             return url
     return ''
 
 def parse_feed(data, feed):
-    if b'<!DOCTYPE' in data.upper() or b'<!ENTITY' in data.upper():
-        raise ValueError('Unsupported XML entity declarations')
+    reject_xml_entities(data)
     root = ET.fromstring(data)
     local = lambda tag: tag.rsplit('}',1)[-1]
     stories, seen = [], set()
@@ -292,8 +591,7 @@ def fetch_feed(feed):
         return fetch_feed_once({**feed,'url':SOURCE,'kind':'drudge'})
 
 def fetch_feed_once(feed):
-    request = Request(feed['url'],headers={'User-Agent':'Mozilla/5.0 OmarchyNews/1.0'})
-    with urlopen(request,timeout=20) as response:
+    with open_public_url(feed['url'], headers={'User-Agent':'Mozilla/5.0 OmarchyNews/1.0'}) as response:
         data = response.read(5_000_001)
     if len(data)>5_000_000: raise ValueError('Feed is too large')
     if feed.get('kind') == 'drudge':
@@ -316,11 +614,17 @@ class Reader(Gtk.Application):
         self.window=None
         self.ready=False
         self.fetching=False
-        self.feeds=read_json(DATA/'feeds.json',DEFAULT_FEEDS)
+        try:
+            self.folders,self.feeds=load_library(read_json(DATA/'feeds.json',DEFAULT_FEEDS))
+        except ValueError:
+            self.folders,self.feeds=load_library(DEFAULT_FEEDS)
+        library_changed=False
         for feed in self.feeds:
             if feed.get('id')=='drudge' and feed.get('url')==SOURCE and feed.get('kind')=='drudge':
                 feed.update(url=DRUDGE_RSS,kind='rss',fallback_url=SOURCE)
-                write_json(DATA/'feeds.json',self.feeds)
+                library_changed=True
+        if library_changed:
+            self.save_library()
         self.cache=read_json(CACHE/'feeds.json',{})
         self.state=read_json(DATA/'state.json',{'read':[],'saved':{},'compact':False})
         self.errors={}
@@ -363,12 +667,17 @@ class Reader(Gtk.Application):
             for story in self.cache.get(feed['id'],{}).get('stories',[]):
                 if story['id'] not in seen:
                     seen.add(story['id']);result.append(story)
-        return sorted(result,key=lambda s:s.get('published',0),reverse=True)
+        result = sorted(result,key=lambda s:s.get('published',0),reverse=True)
+        hide_blocked_images(result)
+        return result
 
     def emit(self):
+        saved = self.state.get('saved')
+        if isinstance(saved, dict):
+            hide_blocked_images(saved.values())
         if self.ready:
             self.evaluate('window.receive('+json.dumps({'stories':self.stories(),'feeds':self.feeds,
-                'state':self.state,'colors':theme_colors(),'loading':self.fetching,'errors':self.errors,
+                'folders':self.folders,'state':self.state,'colors':theme_colors(),'loading':self.fetching,'errors':self.errors,
                 'updated':max((v.get('updated',0) for k,v in self.cache.items() if k in {f['id'] for f in self.feeds}),default=0),
                 'notice':self.notice})+')')
 
@@ -379,9 +688,16 @@ class Reader(Gtk.Application):
             if action=='ready': self.ready=True
             elif action=='refresh': self.refresh();return
             elif action=='add': self.add_feed(m);return
-            elif action=='remove':
-                self.feeds=[f for f in self.feeds if f['id']!=m.get('id')]
-                write_json(DATA/'feeds.json',self.feeds)
+            elif action=='add_folder': self.add_folder(m)
+            elif action=='rename': self.rename_item(m)
+            elif action=='move': self.move_item(m)
+            elif action=='remove': self.remove_item(m.get('id'))
+            elif action=='closed':
+                ids=m.get('ids')
+                if not isinstance(ids,list) or not all(isinstance(item,str) and len(item)<=24 for item in ids):
+                    raise ValueError('Could not save which folders are open.')
+                known={folder['id'] for folder in self.folders}
+                self.state['closed']=[item for item in ids if item in known][:200]
             elif action=='preferences':
                 if m.get('layout') in ('briefing', 'cards', 'feed', 'headlines'):
                     self.state['layout'] = m['layout']
@@ -431,14 +747,65 @@ class Reader(Gtk.Application):
             self.evaluate('window.receiveArticle('+json.dumps({'id':sid,'body':body,'error':error})+')')
         return False
 
+    def save_library(self):
+        write_json(DATA/'feeds.json',{'version':2,'folders':self.folders,'feeds':self.feeds})
+
+    def find_item(self,item_id):
+        for folder in self.folders:
+            if folder['id']==item_id:return 'folder',folder
+        for feed in self.feeds:
+            if feed['id']==item_id:return 'feed',feed
+        return None,None
+
+    def add_folder(self,m):
+        parent=m.get('parent') or ''
+        if not isinstance(parent,str):parent=''
+        assert_new_parent(self.folders,parent)
+        self.folders.append({'id':new_folder_id(),'name':clean_name(m.get('name')),'parent':parent})
+        self.save_library()
+
+    def rename_item(self,m):
+        kind,item=self.find_item(m.get('id'))
+        if item is None:raise ValueError('That item is no longer there.')
+        item['name']=clean_name(m.get('name'))
+        self.save_library()
+
+    def move_item(self,m):
+        parent=m.get('parent') or ''
+        if not isinstance(parent,str):parent=''
+        kind,item=self.find_item(m.get('id'))
+        if item is None:raise ValueError('That item is no longer there.')
+        if kind=='folder':assert_move_folder(self.folders,item['id'],parent)
+        elif parent and not any(folder['id']==parent for folder in self.folders):
+            raise ValueError('That folder is no longer there.')
+        item['parent']=parent
+        self.save_library()
+
+    def remove_item(self,item_id):
+        kind,item=self.find_item(item_id)
+        if item is None:raise ValueError('That item is no longer there.')
+        if kind=='folder':
+            remove_folder(self.folders,self.feeds,item_id)
+            closed=self.state.get('closed')
+            if not isinstance(closed,list):closed=[]
+            self.state['closed']=[folder_id for folder_id in closed if isinstance(folder_id,str) and folder_id!=item_id]
+        else:
+            self.feeds=[feed for feed in self.feeds if feed['id']!=item_id]
+            self.errors.pop(item_id,None)
+        self.save_library()
+
     def add_feed(self,m):
         url=m.get('url','').strip()
         if urlparse(url).scheme not in ('http','https') or not urlparse(url).hostname:
             self.notice='Enter an http or https RSS/Atom feed URL.';self.emit();return
         if any(f['url']==url for f in self.feeds):
             self.notice='That source is already in your reader.';self.emit();return
+        parent=m.get('parent') or ''
+        if not isinstance(parent,str):parent=''
+        if parent and not any(folder['id']==parent for folder in self.folders):
+            self.notice='That folder is no longer there.';self.emit();return
         feed={'id':hashlib.sha256(url.encode()).hexdigest()[:12],
-              'name':m.get('name','').strip()[:70] or urlparse(url).hostname,'url':url,'kind':'rss'}
+              'name':m.get('name','').strip()[:70] or urlparse(url).hostname,'url':url,'kind':'rss','parent':parent}
         def load():
             try:GLib.idle_add(self.added,feed,fetch_feed(feed),None)
             except Exception as exc:GLib.idle_add(self.added,feed,None,'Could not add feed: '+str(exc))
@@ -448,7 +815,7 @@ class Reader(Gtk.Application):
     def added(self,feed,stories,error):
         if error:self.notice=error
         elif not any(f['url']==feed['url'] for f in self.feeds):
-            self.feeds.append(feed);write_json(DATA/'feeds.json',self.feeds)
+            self.feeds.append(feed);self.save_library()
             self.cache[feed['id']]={'stories':stories,'updated':time.time()}
             write_json(CACHE/'feeds.json',self.cache);self.notice='Source added.'
         self.emit();return False
